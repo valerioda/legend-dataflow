@@ -13,7 +13,7 @@ import pandas as pd
 from legendmeta import LegendMetadata
 from legendmeta.catalog import Props
 from pygama.pargen.ecal_th import *  # noqa: F403
-from pygama.pargen.ecal_th import high_stats_fitting
+from pygama.pargen.ecal_th import apply_cuts, high_stats_fitting
 from pygama.pargen.utils import get_tcm_pulser_ids, load_data
 from util.FileKey import ChannelProcKey, ProcessingFileKey
 
@@ -30,43 +30,6 @@ def update_cal_dicts(cal_dicts, update_dict):
     else:
         cal_dicts.update(update_dict)
     return cal_dicts
-
-
-def partition_energy_cal_th(
-    data: pd.Datframe,
-    hit_dicts: dict,
-    energy_params: list[str],
-    selection_string: str = "",
-    threshold: int = 0,
-    p_val: float = 0,
-    plot_options: dict | None = None,
-    simplex: bool = True,
-    tail_weight: int = 20,
-    # cal_energy_params: list = None,
-    # deg:int=2,
-) -> tuple(dict, dict, dict, dict):
-    results_dict = {}
-    plot_dict = {}
-    full_object_dict = {}
-    # if cal_energy_params is None:
-    #     cal_energy_params = [energy_param + "_cal" for energy_param in energy_params]
-    for energy_param in energy_params:
-        full_object_dict[energy_param] = high_stats_fitting(
-            energy_param=energy_param,
-            selection_string=selection_string,
-            threshold=threshold,
-            p_val=p_val,
-            plot_options=plot_options,
-            simplex=simplex,
-            tail_weight=tail_weight,
-        )
-        full_object_dict[energy_param].fit_peaks(data)
-        results_dict[energy_param] = full_object_dict[energy_param].get_results_dict(data)
-        if full_object_dict[energy_param].results:
-            plot_dict[energy_param] = full_object_dict[energy_param].fill_plot_dict(data).copy()
-
-    log.info("Finished all calibrations")
-    return hit_dicts, results_dict, plot_dict, full_object_dict
 
 
 argparser = argparse.ArgumentParser()
@@ -123,6 +86,7 @@ kwarg_dict = Props.read_from(channel_dict)
 
 cal_dict = {}
 results_dicts = {}
+results_ecal = {}
 if isinstance(args.ecal_file, list):
     for ecal in args.ecal_file:
         with open(ecal) as o:
@@ -131,6 +95,7 @@ if isinstance(args.ecal_file, list):
         fk = ChannelProcKey.get_filekey_from_pattern(os.path.basename(ecal))
         cal_dict[fk.timestamp] = cal["pars"]
         results_dicts[fk.timestamp] = cal["results"]
+        results_ecal = cal["results"]["ecal"]
 else:
     with open(args.ecal_file) as o:
         cal = json.load(o)
@@ -138,6 +103,7 @@ else:
     fk = ChannelProcKey.get_filekey_from_pattern(os.path.basename(args.ecal_file))
     cal_dict[fk.timestamp] = cal["pars"]
     results_dicts[fk.timestamp] = cal["results"]
+    results_ecal = cal["results"]["ecal"]
 
 object_dict = {}
 if isinstance(args.eres_file, list):
@@ -199,12 +165,22 @@ params = [
 ]
 params += kwarg_dict["energy_params"]
 
+energy_params = kwarg_dict.pop("energy_params")
+if "cal_energy_params" in kwarg_dict:
+    cal_energy_params = kwarg_dict.pop("cal_energy_params")
+else:
+    cal_energy_params = [energy_param + "_cal" for energy_param in energy_params]
+if "cut_parameters" in kwarg_dict:
+    cut_parameters = kwarg_dict.pop("cut_parameters")
+else:
+    cut_parameters = {}
+
 # load data in
 data, threshold_mask = load_data(
     final_dict,
     f"{args.channel}/dsp",
     cal_dict,
-    params=params,
+    params=energy_params + list(cut_parameters) + ["timestamp", "trapTmax"],
     threshold=kwarg_dict["threshold"],
     return_selection_mask=True,
     cal_energy_param=kwarg_dict["energy_params"][0],
@@ -233,13 +209,35 @@ for tstamp in cal_dict:
         row = pd.DataFrame(row)
         data = pd.concat([data, row])
 
-# run energy supercal
-hit_dicts, ecal_results, plot_dict, ecal_obj = partition_energy_cal_th(
+# apply cuts
+data, cal_dict = apply_cuts(
     data,
     cal_dict,
-    selection_string=f"{kwarg_dict.pop('final_cut_field')}&(~is_pulser)",
-    **kwarg_dict,
+    cut_parameters,
+    kwarg_dict["final_cut_field"],
 )
+log.info(f"selected events n. {len(data)}")
+
+# run energy supercal
+part_results = {}
+plot_dict = {}
+full_object_dict = {}
+for energy_param, cal_energy_param in zip(energy_params, cal_energy_params):
+    pk_cal_pars = results_ecal[cal_energy_param].get("pk_cal_pars", None)
+    full_object_dict = high_stats_fitting(
+        energy_param,
+        cal_energy_param=cal_energy_param,
+        selection_string=f"({kwarg_dict.pop('final_cut_field')})&(~is_pulser)",
+        pk_cal_pars=pk_cal_pars,
+        **kwarg_dict,
+    )
+    full_object_dict[energy_param].update_calibration(data)
+    part_results[energy_param] = full_object_dict[energy_param].get_results_dict(data)
+    cal_dict.update(full_object_dict[cal_energy_param].cal_dict)
+    if full_object_dict[energy_param].results:
+        plot_dict[energy_param] = full_object_dict[energy_param].fill_plot_dict(data).copy()
+log.info("Finished all calibrations")
+
 
 if args.plot_file:
     common_dict = plot_dict.pop("common") if "common" in list(plot_dict) else None
@@ -280,10 +278,10 @@ if args.plot_file:
 for out in sorted(args.hit_pars):
     fk = ChannelProcKey.get_filekey_from_pattern(os.path.basename(out))
     final_hit_dict = {
-        "pars": hit_dicts[fk.timestamp],
+        "pars": cal_dict[fk.timestamp],
         "results": {
             "ecal": results_dicts[fk.timestamp],
-            "partition_ecal": ecal_results,
+            "partition_ecal": part_results,
         },
     }
     pathlib.Path(os.path.dirname(out)).mkdir(parents=True, exist_ok=True)
@@ -294,7 +292,7 @@ for out in args.fit_results:
     fk = ChannelProcKey.get_filekey_from_pattern(os.path.basename(out))
     final_object_dict = {
         "ecal": object_dict[fk.timestamp],
-        "partition_ecal": ecal_obj,
+        "partition_ecal": full_object_dict,
     }
     pathlib.Path(os.path.dirname(out)).mkdir(parents=True, exist_ok=True)
     with open(out, "wb") as w:

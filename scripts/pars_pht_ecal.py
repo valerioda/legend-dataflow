@@ -123,7 +123,7 @@ if __name__ == "__main__":
     argparser = argparse.ArgumentParser()
     argparser.add_argument("--files", help="files", nargs="*", type=str)
     argparser.add_argument("--tcm_filelist", help="tcm_filelist", type=str, required=True)
-    argparser.add_argument("--ctc_dict", help="ctc_dict", nargs="*")
+    argparser.add_argument("--cal_dict", help="cal_dict", nargs="*")
 
     argparser.add_argument("--configs", help="config", type=str, required=True)
     argparser.add_argument("--datatype", help="Datatype", type=str, required=True)
@@ -145,9 +145,8 @@ if __name__ == "__main__":
     logging.getLogger("h5py").setLevel(logging.INFO)
     logging.getLogger("matplotlib").setLevel(logging.INFO)
 
-    database_dic = Props.read_from(args.ctc_dict)
-
-    hit_dict = database_dic[args.channel]["ctc_params"]
+    database_dic = Props.read_from(args.cal_dict)
+    hit_dict = database_dic[args.channel]["pars"]
 
     # get metadata dictionary
     configs = LegendMetadata(path=args.configs)
@@ -216,10 +215,28 @@ if __name__ == "__main__":
     full_object_dict = {}
     for energy_param, cal_energy_param in zip(energy_params, cal_energy_params):
         log.info(f"\nCalibration for {energy_param}")
+        # cal parameters from hit dict
+        cal_pars = hit_dict["operations"][cal_energy_param]["parameters"]
+        if len(cal_pars) < kwarg_dict["deg"]+1:
+            cal_params = {
+                "a": 0,
+                "b": cal_pars["a"],
+                "c": cal_pars["b"]
+            }
+        else:
+            cal_params = cal_pars
+        # fix parameters
+        fix_params = {}
+        fixed = kwarg_dict.pop("fixed")
+        for i, (par, val) in enumerate(cal_params.items()):
+            print(i,par,val)
+            if i in fixed:
+                fix_params[i] = val
         full_object_dict = calibrate_parameter(
             energy_param,
-            cal_energy_param=cal_energy_param,
-            selection_string=f"({kwarg_dict.pop('final_cut_field')})&(~is_pulser)",
+            cal_energy_param = cal_energy_param,
+            selection_string = f"({kwarg_dict.pop('final_cut_field')})&(~is_pulser)",
+            fix_params = fix_params,
             **kwarg_dict,
         )
         full_object_dict[cal_energy_param].calibrate_parameter(data)
