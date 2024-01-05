@@ -29,9 +29,9 @@ rule build_per_energy_calibration:
         tcm_filelist=os.path.join(
             filelist_path(setup), "all-{experiment}-{period}-{run}-cal-tcm.filelist"
         ),
-        ctc_dict=ancient(
+        cal_dict=ancient(
             lambda wildcards: pars_catalog.get_par_file(
-                setup, wildcards.timestamp, "dsp"
+                setup, wildcards.timestamp, "hit"
             )
         ),
     params:
@@ -55,17 +55,16 @@ rule build_per_energy_calibration:
         runtime=300,
     shell:
         "{swenv} python3 -B "
-        f"{workflow.source_path('../scripts/pars_hit_ecal.py')} "
+        f"{workflow.source_path('../scripts/pars_pht_ecal.py')} "
         "--log {log} "
         "--datatype {params.datatype} "
         "--timestamp {params.timestamp} "
         "--channel {params.channel} "
         "--configs {configs} "
-        "--tier {params.tier} "
         "--plot_path {output.plot_file} "
         "--results_path {output.results_file} "
         "--save_path {output.ecal_file} "
-        "--ctc_dict {input.ctc_dict} "
+        "--cal_dict {input.cal_dict} "
         "--tcm_filelist {input.tcm_filelist} "
         "--files {input.files}"
 
