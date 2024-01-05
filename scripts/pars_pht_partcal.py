@@ -78,10 +78,8 @@ def run_splitter(files):
 
 
 configs = LegendMetadata(path=args.configs)
-channel_dict = configs.on(args.timestamp, system=args.datatype)["snakemake_rules"][
-    "pars_pht_partcal"
-]["inputs"]["pars_pht_partcal_config"][args.channel]
-
+channel_dict = configs.on(args.timestamp, system=args.datatype)["snakemake_rules"]
+channel_dict = channel_dict["pars_pht_partcal"]["inputs"]["pars_pht_partcal_config"][args.channel]
 kwarg_dict = Props.read_from(channel_dict)
 
 cal_dict = {}
@@ -166,14 +164,10 @@ params = [
 params += kwarg_dict["energy_params"]
 
 energy_params = kwarg_dict.pop("energy_params")
-if "cal_energy_params" in kwarg_dict:
-    cal_energy_params = kwarg_dict.pop("cal_energy_params")
-else:
-    cal_energy_params = [energy_param + "_cal" for energy_param in energy_params]
-if "cut_parameters" in kwarg_dict:
-    cut_parameters = kwarg_dict.pop("cut_parameters")
-else:
-    cut_parameters = {}
+cal_energy_params = kwarg_dict.pop(
+    "cal_energy_params", [energy_param + "_cal" for energy_param in energy_params]
+)
+cut_parameters = kwarg_dict.pop("cut_parameters", {})
 
 # load data in
 data, threshold_mask = load_data(

@@ -129,7 +129,6 @@ if __name__ == "__main__":
     argparser.add_argument("--datatype", help="Datatype", type=str, required=True)
     argparser.add_argument("--timestamp", help="Timestamp", type=str, required=True)
     argparser.add_argument("--channel", help="Channel", type=str, required=True)
-    argparser.add_argument("--tier", help="tier", type=str, default="hit")
 
     argparser.add_argument("--log", help="log_file", type=str)
 
@@ -152,14 +151,7 @@ if __name__ == "__main__":
     # get metadata dictionary
     configs = LegendMetadata(path=args.configs)
     channel_dict = configs.on(args.timestamp, system=args.datatype)["snakemake_rules"]
-    if args.tier == "hit":
-        channel_dict = channel_dict["pars_hit_ecal"]["inputs"]["ecal_config"][args.channel]
-    elif args.tier == "pht":
-        channel_dict = channel_dict["pars_pht_ecal"]["inputs"]["ecal_config"][args.channel]
-    else:
-        msg = "invalid tier"
-        raise ValueError(msg)
-
+    channel_dict = channel_dict["pars_hit_ecal"]["inputs"]["ecal_config"][args.channel]
     kwarg_dict = Props.read_from(channel_dict)
 
     # convert plot functions from strings to functions and split off baseline and common plots
@@ -172,14 +164,10 @@ if __name__ == "__main__":
     common_plots = kwarg_dict.pop("common_plots")
 
     energy_params = kwarg_dict.pop("energy_params")
-    if "cal_energy_params" in kwarg_dict:
-        cal_energy_params = kwarg_dict.pop("cal_energy_params")
-    else:
-        cal_energy_params = [energy_param + "_cal" for energy_param in energy_params]
-    if "cut_parameters" in kwarg_dict:
-        cut_parameters = kwarg_dict.pop("cut_parameters")
-    else:
-        cut_parameters = {}
+    cal_energy_params = kwarg_dict.pop(
+        "cal_energy_params", [energy_param + "_cal" for energy_param in energy_params]
+    )
+    cut_parameters = kwarg_dict.pop("cut_parameters", {})
 
     # load data in
     data, threshold_mask = load_data(

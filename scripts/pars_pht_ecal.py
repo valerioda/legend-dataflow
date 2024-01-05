@@ -129,7 +129,6 @@ if __name__ == "__main__":
     argparser.add_argument("--datatype", help="Datatype", type=str, required=True)
     argparser.add_argument("--timestamp", help="Timestamp", type=str, required=True)
     argparser.add_argument("--channel", help="Channel", type=str, required=True)
-    argparser.add_argument("--tier", help="tier", type=str, default="hit")
 
     argparser.add_argument("--log", help="log_file", type=str)
 
@@ -151,14 +150,7 @@ if __name__ == "__main__":
     # get metadata dictionary
     configs = LegendMetadata(path=args.configs)
     channel_dict = configs.on(args.timestamp, system=args.datatype)["snakemake_rules"]
-    if args.tier == "hit":
-        channel_dict = channel_dict["pars_hit_ecal"]["inputs"]["ecal_config"][args.channel]
-    elif args.tier == "pht":
-        channel_dict = channel_dict["pars_pht_ecal"]["inputs"]["ecal_config"][args.channel]
-    else:
-        msg = "invalid tier"
-        raise ValueError(msg)
-
+    channel_dict = channel_dict["pars_pht_ecal"]["inputs"]["ecal_config"][args.channel]
     kwarg_dict = Props.read_from(channel_dict)
 
     # convert plot functions from strings to functions and split off baseline and common plots
@@ -171,14 +163,10 @@ if __name__ == "__main__":
     common_plots = kwarg_dict.pop("common_plots")
 
     energy_params = kwarg_dict.pop("energy_params")
-    if "cal_energy_params" in kwarg_dict:
-        cal_energy_params = kwarg_dict.pop("cal_energy_params")
-    else:
-        cal_energy_params = [energy_param + "_cal" for energy_param in energy_params]
-    if "cut_parameters" in kwarg_dict:
-        cut_parameters = kwarg_dict.pop("cut_parameters")
-    else:
-        cut_parameters = {}
+    cal_energy_params = kwarg_dict.pop(
+        "cal_energy_params", [energy_param + "_cal" for energy_param in energy_params]
+    )
+    cut_parameters = kwarg_dict.pop("cut_parameters", {})
 
     # load data in
     data, threshold_mask = load_data(
@@ -217,26 +205,21 @@ if __name__ == "__main__":
         log.info(f"\nCalibration for {energy_param}")
         # cal parameters from hit dict
         cal_pars = hit_dict["operations"][cal_energy_param]["parameters"]
-        if len(cal_pars) < kwarg_dict["deg"]+1:
-            cal_params = {
-                "a": 0,
-                "b": cal_pars["a"],
-                "c": cal_pars["b"]
-            }
+        if len(cal_pars) < kwarg_dict["deg"] + 1:
+            cal_params = {"a": 0, "b": cal_pars["a"], "c": cal_pars["b"]}
         else:
             cal_params = cal_pars
         # fix parameters
         fix_params = {}
         fixed = kwarg_dict.pop("fixed")
-        for i, (par, val) in enumerate(cal_params.items()):
-            print(i,par,val)
+        for i, par in enumerate(cal_params):
             if i in fixed:
-                fix_params[i] = val
+                fix_params[i] = cal_params[par]
         full_object_dict = calibrate_parameter(
             energy_param,
-            cal_energy_param = cal_energy_param,
-            selection_string = f"({kwarg_dict.pop('final_cut_field')})&(~is_pulser)",
-            fix_params = fix_params,
+            cal_energy_param=cal_energy_param,
+            selection_string=f"({kwarg_dict.pop('final_cut_field')})&(~is_pulser)",
+            fix_params=fix_params,
             **kwarg_dict,
         )
         full_object_dict[cal_energy_param].calibrate_parameter(data)
